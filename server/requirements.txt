@@ -11,6 +11,8 @@ python-dotenv>=1.1.0
 # FastAPI framework and dependencies
 fastapi>=0.117.1
 uvicorn>=0.34.1
+uvicorn[standard] 
+gunicorn>=23.0.0
 
 # JSON and HTTP handling (standard dependencies)
 orjson>=3.10.16
