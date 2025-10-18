@@ -8,11 +8,32 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from fastapi import FastAPI, Query
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi import Depends, HTTPException, Header, status #Import for using Authourisation 
 import json
 from uuid import uuid4
 from langgraph.checkpoint.memory import MemorySaver
 
 load_dotenv()
+
+#Adding Authourisation Check Point
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+print(ADMIN_API_KEY)
+async def verify_admin_api_key(authorization: str = Header(None)):
+    if authorization is None or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header."
+        )
+    
+    token = authorization.split(" ")[1]
+    if token != ADMIN_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key."
+        )
+
+
 
 # Initialize memory saver for checkpointing
 memory = MemorySaver()
@@ -185,10 +206,14 @@ async def generate_chat_responses(message: str, checkpoint_id: Optional[str] = N
     yield f"data: {{\"type\": \"end\"}}\n\n"
 
 @app.get("/chat_stream/{message}")
-async def chat_stream(message: str, checkpoint_id: Optional[str] = Query(None)):
+async def chat_stream(message: str, checkpoint_id: Optional[str] = Query(None), _auth = Depends(verify_admin_api_key)):
     return StreamingResponse(
         generate_chat_responses(message, checkpoint_id), 
         media_type="text/event-stream"
     )
 
 # SSE - server-sent events 
+
+@app.get("/")
+async def root(_auth=Depends(verify_admin_api_key)):
+    return JSONResponse({"message" : "Welcome to FBA Dev AI Search Engine. YOU Succesfully authenticated"})
