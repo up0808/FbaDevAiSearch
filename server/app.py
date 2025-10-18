@@ -146,8 +146,10 @@ async def generate_chat_responses(message: str, checkpoint_id: Optional[str] = N
         
         if event_type == "on_chat_model_stream":
             chunk_content = serialise_ai_message_chunk(event["data"]["chunk"])
+            if isinstance(chunk_content, list):
+                chunk_content = " ".join(str(item) for item in chunk_content)
             # Escape single quotes and newlines for safe JSON parsing
-            safe_content = chunk_content.replace("'", "\\'").replace("\n", "\\n")
+            safe_content = str(chunk_content).replace("'", "\\'").replace("\n", "\\n")
             
             yield f"data: {{\"type\": \"content\", \"content\": \"{safe_content}\"}}\n\n"
             
