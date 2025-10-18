@@ -32,4 +32,4 @@ EXPOSE 8000
 
 # Use Gunicorn + Uvicorn for high performance
 CMD ["gunicorn", "app:app", "-k", "uvicorn.workers.UvicornWorker", \
-     "--workers", "8", "--bind", "0.0.0.0:8000", "--timeout", "120"]
+     "--workers", "8", "--bind", "0.0.0.0:${PORT}", "--timeout", "120"]
