@@ -1,6 +1,7 @@
 from typing import TypedDict, Annotated, Optional
 from langgraph.graph import add_messages, StateGraph, END
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI # Gemmini AI Models
+import os
 from langchain_core.messages import HumanMessage, AIMessageChunk, ToolMessage
 from dotenv import load_dotenv
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -25,7 +26,7 @@ search_tool = TavilySearchResults(
 
 tools = [search_tool]
 
-llm = ChatOpenAI(model="gpt-4o")
+llm = ChatGoogleGenerativeAI(model="gpt-4o")
 
 llm_with_tools = llm.bind_tools(tools=tools)
 
