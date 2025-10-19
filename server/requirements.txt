@@ -10,15 +10,14 @@ python-dotenv>=1.1.0
 
 # FastAPI framework and dependencies
 fastapi>=0.117.1
-uvicorn>=0.34.1
-uvicorn[standard] 
+uvicorn[standard]>=0.34.1
 gunicorn>=23.0.0
 
-# JSON and HTTP handling (standard dependencies)
+# JSON and HTTP handling
 orjson>=3.10.16
 
 # For Tavily search integration
-tavily-python>=0.5.0  # provides TavilySearchResults tool
+tavily-python>=0.5.0
 
 # Optional but useful for async behavior and CORS middleware
 httpx>=0.28.1
