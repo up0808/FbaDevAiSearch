@@ -23,6 +23,9 @@ DEPLOYMENT_TIME = datetime.utcnow().isoformat()
 
 # Adding Authorisation Check Point
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+#Load Other API Keys
+GOOGLE_API_KEY=os.getenv("GOOGLE_API_KEY")
+TAVILY_API_KEY=os.getenv("TAVILY_API_KEY")
 
 async def verify_admin_api_key(authorization: str = Header(None)):
     if authorization is None or not authorization.startswith("Bearer "):
@@ -44,10 +47,10 @@ memory = MemorySaver()
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-search_tool = TavilySearchResults(max_results=4)
+search_tool = TavilySearchResults(max_results=4,tavily_api_key=TAVILY_API_KEY)
 tools = [search_tool]
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
 llm_with_tools = llm.bind_tools(tools=tools)
 
 async def model(state: State):
