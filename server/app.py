@@ -1,251 +1,149 @@
-from typing import TypedDict, Annotated, Optional
-from langgraph.graph import add_messages, StateGraph, END
-from langchain_google_genai import ChatGoogleGenerativeAI
 import os
-from langchain_core.messages import HumanMessage, AIMessageChunk, ToolMessage
-from dotenv import load_dotenv
-from langchain_community.tools.tavily_search import TavilySearchResults
-from fastapi import FastAPI, Query
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi import Depends, HTTPException, Header, status
 import json
 from uuid import uuid4
-from langgraph.checkpoint.memory import MemorySaver
 from datetime import datetime
+from typing import TypedDict, Annotated, Optional
 
-# Import v2 functions
+from fastapi import FastAPI, Query, Depends, HTTPException, Header, status
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+from langgraph.graph import add_messages, StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.messages import HumanMessage, AIMessageChunk, ToolMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.tools.tavily_search import TavilySearchResults
+
 from v2 import generate_v2_chat_responses
 
+# Load environment
 load_dotenv()
 
-# App version - update this when you make significant changes
-APP_VERSION = "2.0.0"  # Updated to reflect v2 addition
+APP_VERSION = "2.0.0"
 DEPLOYMENT_TIME = datetime.utcnow().isoformat()
 
-# Adding Authorisation Check Point
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
-#Load Other API Keys
-GOOGLE_API_KEY=os.getenv("GOOGLE_API_KEY")
-TAVILY_API_KEY=os.getenv("TAVILY_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
+# Auth verification
 async def verify_admin_api_key(authorization: str = Header(None)):
-    if authorization is None or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header."
-        )
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
+    if authorization.split(" ")[1] != ADMIN_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key.")
 
-    token = authorization.split(" ")[1]
-    if token != ADMIN_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key."
-        )
-
-# Initialize memory saver for checkpointing
+# Setup for v1
 memory = MemorySaver()
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-search_tool = TavilySearchResults(max_results=4,tavily_api_key=TAVILY_API_KEY)
-tools = [search_tool]
-
+search_tool = TavilySearchResults(max_results=4, tavily_api_key=TAVILY_API_KEY)
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
-llm_with_tools = llm.bind_tools(tools=tools)
+llm_with_tools = llm.bind_tools([search_tool])
 
 async def model(state: State):
-    result = await llm_with_tools.ainvoke(state["messages"])
-    return {"messages": [result]}
+    return {"messages": [await llm_with_tools.ainvoke(state["messages"])]}
 
 async def tools_router(state: State):
     last_message = state["messages"][-1]
-    if hasattr(last_message, "tool_calls") and len(last_message.tool_calls) > 0:
-        return "tool_node"
-    else: 
-        return END
+    return "tool_node" if getattr(last_message, "tool_calls", []) else END
 
-async def tool_node(state):
+async def tool_node(state: State):
     tool_calls = state["messages"][-1].tool_calls
-    tool_messages = []
+    msgs = []
+    for call in tool_calls:
+        if call["name"] == "tavily_search_results_json":
+            results = await search_tool.ainvoke(call["args"])
+            msgs.append(ToolMessage(content=str(results), tool_call_id=call["id"], name=call["name"]))
+    return {"messages": msgs}
 
-    for tool_call in tool_calls:
-        tool_name = tool_call["name"]
-        tool_args = tool_call["args"]
-        tool_id = tool_call["id"]
-
-        if tool_name == "tavily_search_results_json":
-            search_results = await search_tool.ainvoke(tool_args)
-            tool_message = ToolMessage(
-                content=str(search_results),
-                tool_call_id=tool_id,
-                name=tool_name
-            )
-            tool_messages.append(tool_message)
-
-    return {"messages": tool_messages}
-
-graph_builder = StateGraph(State)
-graph_builder.add_node("model", model)
-graph_builder.add_node("tool_node", tool_node)
-graph_builder.set_entry_point("model")
-graph_builder.add_conditional_edges("model", tools_router)
-graph_builder.add_edge("tool_node", "model")
-
-graph = graph_builder.compile(checkpointer=memory)
+graph = (
+    StateGraph(State)
+    .add_node("model", model)
+    .add_node("tool_node", tool_node)
+    .set_entry_point("model")
+    .add_conditional_edges("model", tools_router)
+    .add_edge("tool_node", "model")
+    .compile(checkpointer=memory)
+)
 
 app = FastAPI(
     title="FBA Dev AI Search Engine",
     version=APP_VERSION,
-    description="AI-powered search engine with conversational capabilities (v1 and v2)"
+    description="AI-powered search engine (v1 Tavily + v2 Vertex AI)"
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
-    allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"], 
-    expose_headers=["Content-Type"], 
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-def serialise_ai_message_chunk(chunk): 
-    if isinstance(chunk, AIMessageChunk):
-        return chunk.content
-    else:
-        raise TypeError(
-            f"Object of type {type(chunk).__name__} is not correctly formatted for serialisation"
-        )
+def serialise_chunk(chunk):
+    if not isinstance(chunk, AIMessageChunk):
+        raise TypeError(f"Invalid chunk type: {type(chunk).__name__}")
+    return chunk.content
 
 async def generate_chat_responses(message: str, checkpoint_id: Optional[str] = None):
-    is_new_conversation = checkpoint_id is None
+    new = checkpoint_id is None
+    checkpoint = str(uuid4()) if new else checkpoint_id
+    config = {"configurable": {"thread_id": checkpoint}}
 
-    if is_new_conversation:
-        new_checkpoint_id = str(uuid4())
-        config = {"configurable": {"thread_id": new_checkpoint_id}}
-
-        events = graph.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            version="v2",
-            config=config
-        )
-
-        yield f"data: {{\"type\": \"checkpoint\", \"checkpoint_id\": \"{new_checkpoint_id}\"}}\n\n"
-    else:
-        config = {"configurable": {"thread_id": checkpoint_id}}
-        events = graph.astream_events(
-            {"messages": [HumanMessage(content=message)]},
-            version="v2",
-            config=config
-        )
+    events = graph.astream_events({"messages": [HumanMessage(content=message)]}, version="v2", config=config)
+    if new:
+        yield f'data: {{"type": "checkpoint", "checkpoint_id": "{checkpoint}"}}\n\n'
 
     async for event in events:
-        event_type = event["event"]
+        etype = event["event"]
 
-        if event_type == "on_chat_model_stream":
-            chunk_content = serialise_ai_message_chunk(event["data"]["chunk"])
-            if isinstance(chunk_content, list):
-                chunk_content = " ".join(str(item) for item in chunk_content)
-            safe_content = str(chunk_content).replace("'", "\\'").replace("\n", "\\n")
-            yield f"data: {{\"type\": \"content\", \"content\": \"{safe_content}\"}}\n\n"
+        if etype == "on_chat_model_stream":
+            chunk = serialise_chunk(event["data"]["chunk"])
+            content = " ".join(map(str, chunk)) if isinstance(chunk, list) else chunk
+            safe = str(content).replace("'", "\\'").replace("\n", "\\n")
+            yield f'data: {{"type": "content", "content": "{safe}"}}\n\n'
 
-        elif event_type == "on_chat_model_end":
-            tool_calls = event["data"]["output"].tool_calls if hasattr(event["data"]["output"], "tool_calls") else []
-            search_calls = [call for call in tool_calls if call["name"] == "tavily_search_results_json"]
+        elif etype == "on_chat_model_end":
+            tool_calls = getattr(event["data"]["output"], "tool_calls", [])
+            for call in tool_calls:
+                if call["name"] == "tavily_search_results_json":
+                    query = call["args"].get("query", "")
+                    safe_query = query.replace('"', '\\"').replace("\n", "\\n")
+                    yield f'data: {{"type": "search_start", "query": "{safe_query}"}}\n\n'
 
-            if search_calls:
-                search_query = search_calls[0]["args"].get("query", "")
-                safe_query = search_query.replace('"', '\\"').replace("'", "\\'").replace("\n", "\\n")
-                yield f"data: {{\"type\": \"search_start\", \"query\": \"{safe_query}\"}}\n\n"
-
-        elif event_type == "on_tool_end" and event["name"] == "tavily_search_results_json":
+        elif etype == "on_tool_end" and event["name"] == "tavily_search_results_json":
             output = event["data"]["output"]
+            urls = [item["url"] for item in output if isinstance(item, dict) and "url" in item]
+            yield f'data: {{"type": "search_results", "urls": {json.dumps(urls)}}}\n\n'
 
-            if isinstance(output, list):
-                urls = []
-                for item in output:
-                    if isinstance(item, dict) and "url" in item:
-                        urls.append(item["url"])
+    yield 'data: {"type": "end"}\n\n'
 
-                urls_json = json.dumps(urls)
-                yield f"data: {{\"type\": \"search_results\", \"urls\": {urls_json}}}\n\n"
-
-    yield f"data: {{\"type\": \"end\"}}\n\n"
-
-
-# HEALTH CHECK ENDPOINT (Public - No Auth)
-
+# Endpoints
 @app.get("/health")
 async def health_check():
-    return JSONResponse({
-        "status": "healthy",
-        "service": "FBA Dev AI Search Engine",
-        "version": APP_VERSION,
-        "deployed_at": DEPLOYMENT_TIME,
-        "timestamp": datetime.utcnow().isoformat()
-    })
+    return {"status": "healthy", "version": APP_VERSION, "deployed_at": DEPLOYMENT_TIME}
 
+@app.get("/", dependencies=[Depends(verify_admin_api_key)])
+async def root():
+    return {"message": "Authenticated", "version": APP_VERSION}
 
-# AUTHENTICATED ENDPOINTS
+@app.get("/chat_stream/{message}", dependencies=[Depends(verify_admin_api_key)])
+async def chat_stream(message: str, checkpoint_id: Optional[str] = Query(None)):
+    return StreamingResponse(generate_chat_responses(message, checkpoint_id), media_type="text/event-stream")
 
-@app.get("/")
-async def root(_auth=Depends(verify_admin_api_key)):
-    return JSONResponse({
-        "message": "Welcome to FBA Dev AI Search Engine. YOU Successfully authenticated",
-        "version": APP_VERSION,
-        "endpoints": {
-            "health": "/health",
-            "v1_chat": "/chat_stream/{message}",
-            "v2_chat": "/v2/chat_stream/{message}",
-            "versions": "/versions",
-            "docs": "/docs"
-        }
-    })
+@app.get("/v2/chat_stream/{message}", dependencies=[Depends(verify_admin_api_key)])
+async def chat_stream_v2(message: str, checkpoint_id: Optional[str] = Query(None)):
+    return StreamingResponse(generate_v2_chat_responses(message, checkpoint_id), media_type="text/event-stream")
 
-# V1 ENDPOINT (Original)
-@app.get("/chat_stream/{message}")
-async def chat_stream(
-    message: str, 
-    checkpoint_id: Optional[str] = Query(None), 
-    _auth=Depends(verify_admin_api_key)
-):
-    return StreamingResponse(
-        generate_chat_responses(message, checkpoint_id), 
-        media_type="text/event-stream"
-    )
-
-# V2 ENDPOINT (New - Vertex AI + Google Search)
-@app.get("/v2/chat_stream/{message}")
-async def chat_stream_v2(
-    message: str,
-    checkpoint_id: Optional[str] = Query(None),
-    _auth=Depends(verify_admin_api_key)
-):
-    return StreamingResponse(
-        generate_v2_chat_responses(message, checkpoint_id),
-        media_type="text/event-stream"
-    )
-
-# VERSION COMPARISON ENDPOINT
-@app.get("/versions")
-async def list_versions(_auth=Depends(verify_admin_api_key)):
-    return JSONResponse({
+@app.get("/versions", dependencies=[Depends(verify_admin_api_key)])
+async def versions():
+    return {
         "versions": {
-            "v1": {
-                "endpoint": "/chat_stream/{message}",
-                "model": "Google Gemini 2.5 Flash",
-                "search": "Tavily Search",
-                "features": ["streaming", "checkpointing", "tool_calling"]
-            },
-            "v2": {
-                "endpoint": "/v2/chat_stream/{message}",
-                "model": "Vertex AI Gemini 1.5 Flash",
-                "search": "Google Search API",
-                "features": ["streaming", "checkpointing", "tool_calling", "enterprise_ready"]
-            }
+            "v1": {"model": "Gemini 2.5 Flash", "search": "Tavily"},
+            "v2": {"model": "Vertex AI Gemini 1.5 Flash", "search": "Google Search API"}
         },
-        "current_version": APP_VERSION
-    })
+        "current": APP_VERSION
+    }
