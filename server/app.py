@@ -215,3 +215,60 @@ async def chat_stream(
         generate_chat_responses(message, checkpoint_id), 
         media_type="text/event-stream"
     )
+
+#Creating Version 2 v2
+from v2 import generate_v2_chat_responses
+
+#Endpoints of v2
+
+@app.get("/v2/chat_stream/{message}")
+async def chat_stream_v2(
+    message: str,
+    checkpoint_id: Optional[str] = Query(None),
+    _auth=Depends(verify_admin_api_key)
+):
+    """
+    Version 2 chat endpoint using Vertex AI and Google Search
+    
+    Args:
+        message: User's message/query
+        checkpoint_id: Optional checkpoint ID for conversation continuity
+        
+    Returns:
+        StreamingResponse with SSE (Server-Sent Events)
+        
+    Events:
+        - checkpoint: New conversation checkpoint ID
+        - content: Streamed response content
+        - search_start: Search query initiated
+        - search_results: Search results from Google
+        - end: Stream completed
+    """
+    return StreamingResponse(
+        generate_v2_chat_responses(message, checkpoint_id),
+        media_type="text/event-stream"
+    )
+
+# OPTIONAL: Add a version comparison endpoint
+@app.get("/versions")
+async def list_versions(_auth=Depends(verify_admin_api_key)):
+    """
+    List available API versions and their capabilities
+    """
+    return JSONResponse({
+        "versions": {
+            "v1": {
+                "endpoint": "/chat_stream/{message}",
+                "model": "Google Gemini 2.5 Flash",
+                "search": "Tavily Search",
+                "features": ["streaming", "checkpointing", "tool_calling"]
+            },
+            "v2": {
+                "endpoint": "/v2/chat_stream/{message}",
+                "model": "Vertex AI Gemini 1.5 Flash",
+                "search": "Google Search API",
+                "features": ["streaming", "checkpointing", "tool_calling", "enterprise_ready"]
+            }
+        },
+        "current_version": APP_VERSION
+    })
