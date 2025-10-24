@@ -54,7 +54,7 @@ def initialize_v2_components():
     
     # Initialize Vertex AI Chat Model
     llm = ChatVertexAI(
-        model_name="gemini-1.5-flash",  # or "gemini-1.5-pro" for more capability
+        model_name="gemini-2.5-flash",  # or "gemini-1.5-pro" for more capability
         project=GOOGLE_CLOUD_PROJECT,
         location=GOOGLE_CLOUD_LOCATION,
         temperature=0.7,
