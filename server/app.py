@@ -217,6 +217,7 @@ async def chat_stream(
     )
 
 #Creating Version 2 v2
+'''
 from v2 import generate_v2_chat_responses
 
 #Endpoints of v2
@@ -272,3 +273,4 @@ async def list_versions(_auth=Depends(verify_admin_api_key)):
         },
         "current_version": APP_VERSION
     })
+'''
