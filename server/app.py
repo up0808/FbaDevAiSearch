@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, AIMessageChunk, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 
-from v2 import generate_v2_chat_responses
+#from v2 import generate_v2_chat_responses
 
 # Load environment
 load_dotenv()
@@ -129,7 +129,7 @@ async def health_check():
 @app.get("/", dependencies=[Depends(verify_admin_api_key)])
 async def root():
     return {"message": "Authenticated", "version": APP_VERSION}
-
+'''
 @app.get("/chat_stream/{message}", dependencies=[Depends(verify_admin_api_key)])
 async def chat_stream(message: str, checkpoint_id: Optional[str] = Query(None)):
     return StreamingResponse(generate_chat_responses(message, checkpoint_id), media_type="text/event-stream")
@@ -137,7 +137,7 @@ async def chat_stream(message: str, checkpoint_id: Optional[str] = Query(None)):
 @app.get("/v2/chat_stream/{message}", dependencies=[Depends(verify_admin_api_key)])
 async def chat_stream_v2(message: str, checkpoint_id: Optional[str] = Query(None)):
     return StreamingResponse(generate_v2_chat_responses(message, checkpoint_id), media_type="text/event-stream")
-
+'''
 @app.get("/versions", dependencies=[Depends(verify_admin_api_key)])
 async def versions():
     return {
