@@ -5,6 +5,7 @@ langchain-core>=0.3.52
 langchain-community>=0.3.21
 langchain-google-genai>=3.0.0
 langchain-google-vertexai>=3.0.0
+google-cloud-aiplatform==1.122.0
 
 # Utilities and environment handling
 python-dotenv>=1.1.0
