@@ -24,6 +24,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
                         # Copy your FastAPI app
                         COPY app.py .
+                        COPY v2.py .
 
                         # Expose the port (Cloud Run uses PORT env variable)
                         EXPOSE 8080
